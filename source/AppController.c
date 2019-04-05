@@ -65,6 +65,10 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "XdkSensorHandle.h"
+#include "XDK_LED.h"
+
+
 /* constant definitions ***************************************************** */
 
 /* local variables ********************************************************** */
@@ -78,6 +82,39 @@ static xTaskHandle AppControllerHandle = NULL;/**< OS thread handle for Applicat
 /* inline functions ********************************************************* */
 
 /* local functions ********************************************************** */
+static Accelerometer_XyzData_T processAccel(void)
+{
+	Accelerometer_XyzData_T value = {0,0,0};
+
+	Retcode_T ret = Accelerometer_readXyzGValue(xdkAccelerometers_BMA280_Handle, &value);
+//	if (RETCODE_SUCCESS != ret)
+//	{
+//		printf("Errorcode %lu while reading accel data\n\r", ret);
+//	}
+//	else
+//	{
+//		printf("accel is %f in x axis\n\r", (float) value.xAxisData);
+//		printf("accel is %f in y axis\n\r", (float) value.yAxisData);
+//		printf("accel is %f in z axis\n\r", (float) value.zAxisData);
+//	}
+
+	return value;
+}
+
+static Retcode_T initAccelSensor(void)
+{
+	Retcode_T ret = Accelerometer_init(xdkAccelerometers_BMA280_Handle);
+	if (RETCODE_SUCCESS != ret)
+		return ret;
+	ret = Accelerometer_setRange(xdkAccelerometers_BMA280_Handle,
+			ACCELEROMETER_BMA280_RANGE_16G);
+	if (RETCODE_SUCCESS != ret)
+		return ret;
+	ret = Accelerometer_setBandwidth(xdkAccelerometers_BMA280_Handle,
+			ACCELEROMETER_BMA280_BANDWIDTH_125HZ);
+	return ret;
+}
+
 
 /**
  * @brief Responsible for controlling application control flow.
@@ -95,8 +132,25 @@ static void AppControllerFire(void* pvParameters)
      its caller function as there is nothing to return to. */
     while (1)
     {
-        /* code to implement application control flow */
-        ;
+    	// value is in mg
+    	Accelerometer_XyzData_T separated_accel = processAccel();
+    	int32_t squared_accel = separated_accel.xAxisData * separated_accel.xAxisData
+    			             + separated_accel.yAxisData * separated_accel.yAxisData
+					         + separated_accel.zAxisData * separated_accel.zAxisData;
+    	//int32_t accel = (int) sqrt(squared_accel);
+
+    	// threshold is -10616 mg because resolution is only approx. 2mg
+    	const int32_t squared_threshold = 10616*10616;
+    	if (squared_accel > squared_threshold)
+    	{
+    		// collision detected
+    		printf("collision detected\n");
+    		LED_On(LED_INBUILT_ORANGE);
+    		// stay on for 1 second
+    		const TickType_t xDelay = 1000 / portTICK_PERIOD_MS;
+    		vTaskDelay(xDelay);
+    		LED_Off(LED_INBUILT_ORANGE);
+    	}
     }
 }
 
@@ -129,6 +183,22 @@ static void AppControllerEnable(void * param1, uint32_t param2)
         Retcode_RaiseError(retcode);
         assert(0); /* To provide LED indication for the user */
     }
+
+    retcode = initAccelSensor();
+    if (RETCODE_OK != retcode)
+	{
+		printf("Accel sensor could not be initialized\r\n");
+		Retcode_RaiseError(retcode);
+		assert(0); /* To provide LED indication for the user */
+	}
+
+    retcode = LED_Enable();
+    if (RETCODE_OK != retcode)
+	{
+		printf("LEDs could not be initialized\r\n");
+		Retcode_RaiseError(retcode);
+		assert(0); /* To provide LED indication for the user */
+	}
 }
 
 /**
